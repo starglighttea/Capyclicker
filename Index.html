@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Capybara Clicker</title>
+<style>
+body {
+  background: #d0f0c0;
+  font-family: 'Press Start 2P', cursive;
+  text-align: center;
+  margin: 0;
+  overflow-x: hidden;
+  animation: bgAnimation 10s infinite alternate;
+}
+
+@keyframes bgAnimation {
+  0% { background-color: #d0f0c0; }
+  50% { background-color: #c0f0d0; }
+  100% { background-color: #d0f0f0; }
+}
+
+h1,h2 { margin: 10px; }
+
+#game-container {
+  max-width: 800px;
+  margin: auto;
+}
+
+#capybara-container {
+  width: 128px;
+  height: 128px;
+  margin: 20px auto;
+  cursor: pointer;
+  image-rendering: pixelated;
+  background-size: 512px 256px;
+  position: relative;
+}
+
+#score-display, #level-display {
+  font-size: 16px;
+  margin: 5px;
+}
+
+#store {
+  margin-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.upgrade {
+  background: #fff8c0;
+  border: 2px solid #000;
+  margin: 5px;
+  padding: 5px;
+  width: 130px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: 0.2s;
+  position: relative;
+}
+.upgrade:hover { transform: scale(1.05); }
+.upgrade.locked { opacity: 0.4; cursor: not-allowed; }
+
+.floating-num {
+  position: absolute;
+  font-size: 14px;
+  font-weight: bold;
+  color: gold;
+  pointer-events: none;
+  animation: floatUp 0.8s forwards;
+}
+@keyframes floatUp {
+  0% { transform: translateY(0); opacity:1; }
+  100% { transform: translateY(-50px); opacity:0; }
+}
+</style>
+</head>
+<body>
+<div id="game-container">
+<h1>Capybara Clicker</h1>
+<div id="capybara-container"></div>
+<div id="score-display">Caps: <span id="score">0</span></div>
+<div id="level-display">Level: <span id="level">1</span></div>
+<div id="store"></div>
+</div>
+
+<!-- Background music -->
+<audio id="bg-music" loop autoplay>
+  <source src="https://freesound.org/data/previews/504/504064_10212327-lq.mp3" type="audio/mpeg">
+</audio>
+
+<script>
+// ---------- AUDIO ----------
+const clickSound = new Audio('https://freesound.org/data/previews/109/109662_945474-lq.mp3');
+const evolveSound = new Audio('https://freesound.org/data/previews/331/331912_3248244-lq.mp3');
+const upgradeSound = new Audio('https://freesound.org/data/previews/256/256113_3263906-lq.mp3');
+const bgMusic = document.getElementById('bg-music');
+
+// ---------- GAME VARIABLES ----------
+let score = parseFloat(localStorage.getItem('score')) || 0;
+let clickPower = parseFloat(localStorage.getItem('clickPower')) || 1;
+let level = parseInt(localStorage.getItem('level')) || 1;
+let evolutionThreshold = 1000;
+
+// Sprite sheets
+const sprites = [
+  'https://i.imgur.com/7jrmWc7.png',
+  'https://i.imgur.com/6XGq1y5.png',
+  'https://i.imgur.com/3c2g7np.png',
+  'https://i.imgur.com/1O1Vv4q.png',
+  'https://i.imgur.com/1cX1v4p.png'
+];
+
+const capybara = document.getElementById('capybara-container');
+const scoreDisplay = document.getElementById('score');
+const levelDisplay = document.getElementById('level');
+const storeContainer = document.getElementById('store');
+
+const totalFrames = 4;
+let idleFrame = 0;
+let idleInterval;
+let isClicking = false;
+
+// ---------- UPGRADES ----------
+const upgrades = [];
+for (let i = 1; i <= 50; i++) {
+  upgrades.push({
+    id: i,
+    name: `Upgrade ${i}`,
+    cost: Math.floor(10 * Math.pow(1.5, i-1)),
+    multiplier: 1 + i*0.1,
+    bought: false,
+    autoClick: i%5===0 ? i : 0
+  });
+}
+
+// ---------- ANIMATIONS ----------
+function startIdleAnimation() {
+  clearInterval(idleInterval);
+  idleInterval = setInterval(()=>{
+    if(!isClicking){
+      capybara.style.backgroundPosition = `-${128*idleFrame}px 0px`;
+      idleFrame = (idleFrame+1)%totalFrames;
+    }
+  },300);
+}
+
+function animateClick() {
+  isClicking = true;
+  clickSound.currentTime=0; clickSound.play();
+  let clickFrame = 0;
+  const interval = setInterval(()=>{
+    capybara.style.backgroundPosition = `-${128*clickFrame}px -128px`;
+    clickFrame++;
+    if(clickFrame>=totalFrames){
+      clearInterval(interval);
+      isClicking=false;
+    }
+  },75);
+}
+
+// ---------- FLOATING NUMBERS ----------
+function showFloatingNumber(val){
+  const span = document.createElement('span');
+  span.className = 'floating-num';
+  span.textContent = `+${Math.floor(val)}`;
+  const rect = capybara.getBoundingClientRect();
+  span.style.left = `${rect.width/2}px`;
+  span.style.top = `0px`;
+  capybara.appendChild(span);
+  setTimeout(()=>span.remove(),800);
+}
+
+// ---------- STORE ----------
+function renderStore(){
+  storeContainer.innerHTML = '';
+  upgrades.forEach(upg=>{
+    const btn = document.createElement('div');
+    btn.className = 'upgrade' + (score<upg.cost?' locked':'');
+    btn.innerHTML = `${upg.name}<br>Cost: ${upg.cost}<br>+${upg.multiplier.toFixed(1)}x${upg.autoClick?'<br>Auto '+upg.autoClick+'/sec':''}`;
+    btn.onclick = ()=>{
+      if(score>=upg.cost&&!upg.bought){
+        buyUpgrade(upg.id);
+      }
+    };
+    storeContainer.appendChild(btn);
+  });
+}
+
+// ---------- BUY UPGRADE ----------
+function buyUpgrade(id){
+  const upg = upgrades.find(u=>u.id===id);
+  if(!upg.bought && score>=upg.cost){
+    score -= upg.cost;
+    clickPower *= upg.multiplier;
+    upg.bought = true;
+    upgradeSound.currentTime=0; upgradeSound.play();
+    if(upg.autoClick){
+      setInterval(()=>{
+        score += upg.autoClick;
+        updateScore();
+        checkEvolution();
+      },1000);
+    }
+    updateScore();
+    renderStore();
+    saveProgress();
+  }
+}
+
+// ---------- CLICK HANDLER ----------
+capybara.onclick = ()=>{
+  score += clickPower;
+  showFloatingNumber(clickPower);
+  updateScore();
+  animateClick();
+  checkEvolution();
+  saveProgress();
+}
+
+// ---------- SCORE & LEVEL ----------
+function updateScore(){
+  scoreDisplay.textContent = Math.floor(score);
+  levelDisplay.textContent = level;
+}
+
+// ---------- EVOLUTION ----------
+function checkEvolution(){
+  if(score>=evolutionThreshold){
+    level++;
+    evolutionThreshold*=2;
+    updateScore();
+    animateEvolution();
+    saveProgress();
+  }
+}
+
+// Smooth evolution animation
+function animateEvolution(){
+  evolveSound.currentTime=0; evolveSound.play();
+  const currentSprite = capybara.style.backgroundImage;
+  const nextSprite = sprites[Math.min(level-1,sprites.length-1)];
+  let frameCount=0;
+  const transitionFrames=8;
+  const evoInterval = setInterval(()=>{
+    capybara.style.backgroundImage = frameCount%2===0?`url('${nextSprite}')`:currentSprite;
+    frameCount++;
+    if(frameCount>transitionFrames){
+      clearInterval(evoInterval);
+      capybara.style.backgroundImage = `url('${nextSprite}')`;
+      startIdleAnimation();
+      showEvolutionEffect();
+    }
+  },150);
+}
+
+// Evolution sparkle effect
+function showEvolutionEffect(){
+  const spark = document.createElement('div');
+  spark.textContent = '✨';
+  spark.style.position='absolute';
+  spark.style.left='40px';
+  spark.style.top='-20px';
+  spark.style.fontSize='24px';
+  capybara.appendChild(spark);
+  setTimeout(()=>spark.remove(),800);
+}
+
+// ---------- SAVE/LOAD ----------
+function saveProgress(){
+  localStorage.setItem('score',score);
+  localStorage.setItem('clickPower',clickPower);
+  localStorage.setItem('level',level);
+}
+
+// ---------- INIT ----------
+function initGame(){
+  capybara.style.backgroundImage = `url('${sprites[Math.min(level-1,sprites.length-1)]}')`;
+  startIdleAnimation();
+  renderStore();
+  updateScore();
+  bgMusic.volume = 0.3; // subtle background music
+}
+
+initGame();
+</script>
+</body>
+</html>
